@@ -70,6 +70,18 @@ window.addEventListener('rs-save', () => {
   flashTitle('saved');
 });
 
+let conflicted = false;
+window.addEventListener('rs-conflict', () => {
+  if (conflicted) return;
+  conflicted = true;
+  const p = document.createElement('p');
+  p.textContent = 'Rootspire is running in another tab, which has saved more recently. ' +
+    'This tab has stopped saving so it cannot overwrite that progress.';
+  showModal('Another tab is playing', p, [
+    ['Reload this tab', () => location.reload()],
+  ]);
+});
+
 window.addEventListener('rs-export', () => {
   const blob = SV.exportSave(S);
   const ta = textAreaNode(blob);

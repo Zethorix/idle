@@ -224,6 +224,24 @@ main { flex: 1; min-width: 0; }
 .log-t { color: var(--dim); min-width: 64px; text-align: right; flex-shrink: 0; }
 .log-msg { color: var(--fg); }
 
+/* ---------------- achievements */
+.ach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+.ach {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: var(--bg2);
+  opacity: 0.45;
+}
+.ach.done { opacity: 1; border-color: var(--accent); }
+.ach-name { font-size: 12px; color: var(--accent); }
+.ach-desc { font-size: 11px; color: var(--dim); }
+
 /* ---------------- modal */
 .modal-wrap {
   position: fixed;

@@ -706,6 +706,22 @@ function buildChroniclePanel() {
   $.statsSection = section(p, 'Statistics');
   $.statsBox = el('div', 'stats');
   $.statsSection.appendChild($.statsBox);
+
+  $.achSection = section(p, 'Achievements', 'Each achievement: +2% all production, forever.');
+  $.achCount = el('div', 'card-info', '');
+  $.achSection.appendChild($.achCount);
+  const grid = el('div', 'ach-grid');
+  $.achSection.appendChild(grid);
+  rows.ach = {};
+  for (const a of D.ACHIEVEMENTS) {
+    const cell = el('div', 'ach');
+    cell.appendChild(el('div', 'ach-name', a.name));
+    cell.appendChild(el('div', 'ach-desc', a.desc));
+    cell.title = a.desc;
+    grid.appendChild(cell);
+    rows.ach[a.id] = cell;
+  }
+
   const logSec = section(p, 'Chronicle');
   $.logBox = el('div', 'log');
   logSec.appendChild($.logBox);
@@ -723,6 +739,13 @@ function updateChronicle() {
       $.logBox.appendChild(row);
     }
   }
+  const achieved = E.achievementCount(S);
+  setText($.achCount,
+    `${achieved} / ${D.ACHIEVEMENTS.length} earned — production ×${fmt(Math.pow(D.ACHIEVEMENT_MULT, achieved))}`);
+  for (const a of D.ACHIEVEMENTS) {
+    rows.ach[a.id].classList.toggle('done', !!S.achievements[a.id]);
+  }
+
   const st = S.stats;
   $.statsBox.textContent =
     `play time ${fmtTime(st.playTime)} · clicks ${fmt(st.clicks)} · ` +

@@ -292,6 +292,42 @@ export const RULE_ACTIONS = [
   { id: 'expedition',   name: 'Launch expedition' },
 ];
 
+// ---------------------------------------------------------------- Achievements
+// Each earned achievement grants a permanent +2% global production.
+export const ACHIEVEMENT_MULT = 1.02;
+export const ACHIEVEMENTS = [
+  { id: 'click1',    name: 'First handful',     desc: 'Gather once.',                     check: s => s.stats.clicks >= 1 },
+  { id: 'click100',  name: 'Calloused hands',   desc: 'Gather 100 times.',                check: s => s.stats.clicks >= 100 },
+  { id: 'click2500', name: 'Stubborn as roots', desc: 'Gather 2,500 times.',              check: s => s.stats.clicks >= 2500 },
+  { id: 'bld1',      name: 'Groundbreaking',    desc: 'Construct a building.',            check: s => countBuildings(s) >= 1 },
+  { id: 'bld50',     name: 'A proper town',     desc: 'Own 50 buildings.',                check: s => countBuildings(s) >= 50 },
+  { id: 'bld250',    name: 'Sprawl',            desc: 'Own 250 buildings.',               check: s => countBuildings(s) >= 250 },
+  { id: 'bld1000',   name: 'City at the roots', desc: 'Own 1,000 buildings.',             check: s => countBuildings(s) >= 1000 },
+  { id: 'vill5',     name: 'Company',           desc: 'House 5 villagers.',               check: s => s.villagers.length >= 5 },
+  { id: 'vill15',    name: 'A crowd',           desc: 'House 15 villagers.',              check: s => s.villagers.length >= 15 },
+  { id: 'vill30',    name: 'A village',         desc: 'House 30 villagers.',              check: s => s.villagers.length >= 30 },
+  { id: 'vill60',    name: 'A people',          desc: 'House 60 villagers.',              check: s => s.villagers.length >= 60 },
+  { id: 'lvl10',     name: 'Apprentice',        desc: 'Reach job level 10.',              check: s => maxJobLevel(s) >= 10 },
+  { id: 'lvl25',     name: 'Journeyman',        desc: 'Reach job level 25.',              check: s => maxJobLevel(s) >= 25 },
+  { id: 'lvl50',     name: 'Master',            desc: 'Reach job level 50.',              check: s => maxJobLevel(s) >= 50 },
+  { id: 'lvl100',    name: 'Beyond mastery',    desc: 'Reach job level 100.',             check: s => maxJobLevel(s) >= 100 },
+  { id: 'metal1',    name: 'First ingot',       desc: 'Smelt metal.',                     check: s => s.lifetime.metal >= 1 },
+  { id: 'tools1',    name: 'Tooled up',         desc: 'Craft tools.',                     check: s => s.lifetime.tools >= 1 },
+  { id: 'gear1',     name: 'Outfitted',         desc: 'Forge expedition gear.',           check: s => s.lifetime.gear >= 1 },
+  { id: 'coins1m',   name: 'Merchant prince',   desc: 'Earn 1M coins.',                   check: s => s.stats.coinsEarned >= 1e6 },
+  { id: 'ess10k',    name: 'Steeped in essence', desc: 'Earn 10K essence.',               check: s => s.stats.essenceEarned >= 1e4 },
+  { id: 'exp10',     name: 'Trailblazer',       desc: 'Complete 10 expeditions.',         check: s => s.stats.expeditions >= 10 },
+  { id: 'exp50',     name: 'Spirefarer',        desc: 'Complete 50 expeditions.',         check: s => s.stats.expeditions >= 50 },
+  { id: 'exp200',    name: 'The stairs know you', desc: 'Complete 200 expeditions.',      check: s => s.stats.expeditions >= 200 },
+  { id: 'floor5',    name: 'First Sanctum',     desc: 'Conquer floor 5.',                 check: s => s.spire.floor >= 5 },
+  { id: 'floor10',   name: 'Above the clouds',  desc: 'Conquer floor 10.',                check: s => s.spire.floor >= 10 },
+  { id: 'floor20',   name: 'Thin air',          desc: 'Conquer floor 20.',                check: s => s.spire.floor >= 20 },
+  { id: 'floor30',   name: 'The Summit Gate',   desc: 'Conquer floor 30.',                check: s => s.spire.floor >= 30 },
+  { id: 'rally10',   name: 'Voice of the horn', desc: 'Rally the camp 10 times.',         check: s => (s.stats.rallies || 0) >= 10 },
+];
+function countBuildings(s) { let n = 0; for (const k in s.buildings) n += s.buildings[k]; return n; }
+function maxJobLevel(s) { let m = 0; for (const k in s.jobs) m = Math.max(m, s.jobs[k].level); return m; }
+
 // ---------------------------------------------------------------- Rally
 // Active-play burst: ×RALLY_MULT all production for RALLY_SECS, then cooldown.
 export const RALLY_MULT = 3;

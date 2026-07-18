@@ -20,6 +20,7 @@ export function newState(nowMs) {
     blessings: {},                      // id -> rank
     spire: { floor: 0, progress: 0, exp: null, autoRepeat: false },
     rally: { activeUntil: 0, readyAt: 0 },
+    achievements: {},
     rules: [],                          // foreman rules
     unlocked: {                         // sticky progressive-disclosure flags
       buildings: false, villagers: false, tier1: false, market: false,
@@ -28,7 +29,7 @@ export function newState(nowMs) {
     },
     stats: {
       started: nowMs, playTime: 0, clicks: 0, expeditions: 0,
-      coinsEarned: 0, essenceEarned: 0,
+      coinsEarned: 0, essenceEarned: 0, rallies: 0,
     },
     log: [],
     settings: { buyQty: 1 },
@@ -66,7 +67,13 @@ export function globalMult(s) {
   return Math.pow(D.FLOOR_MULT, s.spire.floor)
        * Math.pow(D.SANCTUM_MULT, sanctumCount(s.spire.floor))
        * Math.pow(1.25, s.blessings.vigor || 0)
+       * Math.pow(D.ACHIEVEMENT_MULT, achievementCount(s))
        * (rallyActive(s) ? D.RALLY_MULT : 1);
+}
+export function achievementCount(s) {
+  let n = 0;
+  for (const k in s.achievements) if (s.achievements[k]) n++;
+  return n;
 }
 export function rallyActive(s) {
   return s.rally && s.stats.playTime < s.rally.activeUntil;
@@ -78,6 +85,7 @@ export function activateRally(s) {
   if (!rallyReady(s)) return false;
   s.rally.activeUntil = s.stats.playTime + D.RALLY_SECS;
   s.rally.readyAt = s.stats.playTime + D.RALLY_COOLDOWN;
+  s.stats.rallies = (s.stats.rallies || 0) + 1;
   return true;
 }
 export function milestoneMult(count) {
@@ -399,8 +407,18 @@ export function tick(s, dt) {
 
   s.stats.playTime += dt;
   checkUnlocks(s);
+  checkAchievements(s);
   s._info = info;
   return info;
+}
+
+function checkAchievements(s) {
+  for (const a of D.ACHIEVEMENTS) {
+    if (!s.achievements[a.id] && a.check(s)) {
+      s.achievements[a.id] = true;
+      addLog(s, `Achievement — ${a.name}: ${a.desc} (+2% all production, permanent)`);
+    }
+  }
 }
 
 function checkFloor(s) {

@@ -1,0 +1,131 @@
+// Rootspire — bootstrap and main loop.
+
+import * as E from './engine.js';
+import * as SV from './save.js';
+import { initUI, updateUI, showModal, hideModal, offlineReportNode, textAreaNode } from './ui.js';
+
+const TICK_MS = 200;          // logic cadence
+const AUTOSAVE_MS = 10_000;
+const SUSPEND_THRESHOLD = 120; // >2 min gap => treat as offline time
+
+let S = SV.load();
+let fresh = false;
+if (!S) { S = E.newState(Date.now()); fresh = true; }
+
+// Offline progress for returning players.
+if (!fresh && S.savedAt) {
+  const away = (Date.now() - S.savedAt) / 1000;
+  if (away > 30) {
+    const report = E.runOffline(S, away);
+    initUI(S, onPlayerAction);
+    showModal('While you were away', offlineReportNode(report), [['Back to work', hideModal]]);
+  } else {
+    initUI(S, onPlayerAction);
+  }
+} else {
+  initUI(S, onPlayerAction);
+}
+
+function onPlayerAction() { updateUI(); }
+
+// ---------------------------------------------------------------- loop
+let last = performance.now();
+let sinceSave = 0;
+
+setInterval(() => {
+  const now = performance.now();
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt <= 0) return;
+
+  if (dt > SUSPEND_THRESHOLD) {
+    // Tab was suspended for a while — run it as offline time with a report.
+    const report = E.runOffline(S, dt);
+    showModal('While you were away', offlineReportNode(report), [['Back to work', hideModal]]);
+  } else {
+    // Catch up in ≤1s slices so long throttled gaps stay accurate.
+    while (dt > 0) {
+      const step = Math.min(1, dt);
+      E.tick(S, step);
+      dt -= step;
+    }
+  }
+  updateUI();
+
+  sinceSave += TICK_MS;
+  if (sinceSave >= AUTOSAVE_MS) {
+    sinceSave = 0;
+    SV.save(S);
+  }
+}, TICK_MS);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) SV.save(S);
+});
+window.addEventListener('beforeunload', () => SV.save(S));
+
+// ---------------------------------------------------------------- save UI
+window.addEventListener('rs-save', () => {
+  SV.save(S);
+  flashTitle('saved');
+});
+
+window.addEventListener('rs-export', () => {
+  const blob = SV.exportSave(S);
+  const ta = textAreaNode(blob);
+  showModal('Export save', wrap(ta,
+    'Copy this text somewhere safe. Import it on any device to continue.'), [
+    ['Copy to clipboard', () => {
+      ta.select();
+      navigator.clipboard?.writeText(ta.value).catch(() => document.execCommand('copy'));
+    }],
+    ['Close', hideModal, 'small'],
+  ]);
+  ta.select();
+});
+
+window.addEventListener('rs-import', () => {
+  const ta = textAreaNode('', 'Paste an exported save here…');
+  showModal('Import save', wrap(ta,
+    'This replaces your current progress with the imported save.'), [
+    ['Import', () => {
+      try {
+        const imported = SV.importSave(ta.value);
+        S = imported;
+        SV.save(S);
+        location.reload();
+      } catch (e) {
+        alert('That did not look like a valid save. (' + e.message + ')');
+      }
+    }],
+    ['Cancel', hideModal, 'small'],
+  ]);
+});
+
+window.addEventListener('rs-reset', () => {
+  const ta = textAreaNode('', 'type RESET to confirm');
+  showModal('Hard reset', wrap(ta,
+    'This erases ALL progress permanently. Rootspire has no prestige resets — you never need to do this to progress. Type RESET to confirm.'), [
+    ['Erase everything', () => {
+      if (ta.value.trim() === 'RESET') {
+        SV.wipe();
+        location.reload();
+      }
+    }, 'danger'],
+    ['Cancel', hideModal, 'small'],
+  ]);
+});
+
+function wrap(node, text) {
+  const box = document.createElement('div');
+  const p = document.createElement('p');
+  p.textContent = text;
+  box.append(p, node);
+  return box;
+}
+
+function flashTitle(msg) {
+  const t = document.title;
+  document.title = `✓ ${msg} — Rootspire`;
+  setTimeout(() => { document.title = t; }, 1200);
+}

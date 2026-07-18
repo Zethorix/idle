@@ -283,7 +283,7 @@ export const OFFLINE_DECAY_RATE = 0.85;           // then 85%
 export const OFFLINE_BASE_CAP_HOURS = 8;          // extended by floor 4 (12), floor 7 (24), patience
 
 // ---------------------------------------------------------------- Foreman
-export const BASE_RULE_SLOTS = 3;
+export const BASE_RULE_SLOTS = 4;
 export const RULE_ACTIONS = [
   { id: 'buyBuilding',  name: 'Buy building' },
   { id: 'buyConverter', name: 'Buy converter' },

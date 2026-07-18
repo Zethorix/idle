@@ -725,6 +725,13 @@ function buildChroniclePanel() {
   const logSec = section(p, 'Chronicle');
   $.logBox = el('div', 'log');
   logSec.appendChild($.logBox);
+
+  const foot = el('div', 'footer');
+  const a = el('a', null, 'Rootspire v1 — source & issues on GitHub');
+  a.href = 'https://github.com/Zethorix/idle';
+  a.target = '_blank';
+  foot.appendChild(a);
+  p.appendChild(foot);
 }
 
 function updateChronicle() {

@@ -81,6 +81,7 @@ function decide() {
   }
 
   // spire
+  if (E.rallyReady(S)) E.activateRally(S);
   E.launchExpedition(S);
   if (S.unlocked.autoexpedition) S.spire.autoRepeat = true;
 

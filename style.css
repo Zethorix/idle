@@ -102,6 +102,9 @@ main { flex: 1; min-width: 0; }
   background: var(--bg2);
 }
 .gather:active:not(:disabled) { background: var(--bg3); }
+.gather.rally { border-color: #8a6d4d; color: #d9b45b; margin-bottom: 2px; }
+.bar.rally { height: 8px; margin: 0 0 10px; }
+.bar.rally .bar-fill { background: #8a6d4d; }
 
 .res-table { width: 100%; border-collapse: collapse; background: var(--bg2); }
 .res-table td { padding: 3px 8px; border-bottom: 1px solid var(--line); }

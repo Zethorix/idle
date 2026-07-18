@@ -98,6 +98,10 @@ export function initUI(state, actionCb) {
   const side = el('aside');
   $.gather = btn('Gather (+1 food, +1 wood)', 'gather', () => E.doClick(S));
   side.appendChild($.gather);
+  $.rally = btn('Rally the camp', 'gather rally', () => E.activateRally(S));
+  side.appendChild($.rally);
+  $.rallyBar = bar('rally');
+  side.appendChild($.rallyBar);
   $.resTable = el('table', 'res-table');
   side.appendChild($.resTable);
   $.villSummary = el('div', 'vill-summary', '');
@@ -760,6 +764,26 @@ export function updateUI() {
   // gather button
   const cm = E.clickYieldMult(S);
   setText($.gather, `Gather  (+${fmt(D.CLICK_YIELD.food * cm)} food, +${fmt(D.CLICK_YIELD.wood * cm)} wood)`);
+
+  // rally
+  show($.rally, S.unlocked.rally);
+  show($.rallyBar, S.unlocked.rally);
+  if (S.unlocked.rally) {
+    const t = S.stats.playTime;
+    if (E.rallyActive(S)) {
+      $.rally.disabled = true;
+      setText($.rally, `Rallying! all production ×${D.RALLY_MULT}`);
+      setBar($.rallyBar, (S.rally.activeUntil - t) / D.RALLY_SECS, fmtTime(S.rally.activeUntil - t) + ' left');
+    } else if (!E.rallyReady(S)) {
+      $.rally.disabled = true;
+      setText($.rally, 'Rally the camp');
+      setBar($.rallyBar, 1 - (S.rally.readyAt - t) / D.RALLY_COOLDOWN, 'ready in ' + fmtTime(S.rally.readyAt - t));
+    } else {
+      $.rally.disabled = false;
+      setText($.rally, `Rally the camp (×${D.RALLY_MULT} for ${fmtTime(D.RALLY_SECS)})`);
+      setBar($.rallyBar, 1, 'ready');
+    }
+  }
 
   // resources
   for (const r of D.RESOURCES) {

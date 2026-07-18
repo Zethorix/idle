@@ -292,6 +292,12 @@ export const RULE_ACTIONS = [
   { id: 'expedition',   name: 'Launch expedition' },
 ];
 
+// ---------------------------------------------------------------- Rally
+// Active-play burst: ×RALLY_MULT all production for RALLY_SECS, then cooldown.
+export const RALLY_MULT = 3;
+export const RALLY_SECS = 90;
+export const RALLY_COOLDOWN = 900;         // 15 min between uses (including active time)
+
 // ---------------------------------------------------------------- Misc
 export const CLICK_YIELD = { food: 1, wood: 1 };
 export const TIER1_UNLOCK_STONE = 40;      // seeing this much stone reveals the wider world

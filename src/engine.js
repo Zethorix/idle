@@ -19,11 +19,12 @@ export function newState(nowMs) {
     upgrades: {},                       // id -> tiers bought
     blessings: {},                      // id -> rank
     spire: { floor: 0, progress: 0, exp: null, autoRepeat: false },
+    rally: { activeUntil: 0, readyAt: 0 },
     rules: [],                          // foreman rules
     unlocked: {                         // sticky progressive-disclosure flags
       buildings: false, villagers: false, tier1: false, market: false,
       spire: false, blessings: false, tier2: false, foreman: false,
-      autoexpedition: false,
+      autoexpedition: false, rally: false,
     },
     stats: {
       started: nowMs, playTime: 0, clicks: 0, expeditions: 0,
@@ -64,7 +65,20 @@ export function sanctumCount(floor) { return Math.floor(floor / 5); }
 export function globalMult(s) {
   return Math.pow(D.FLOOR_MULT, s.spire.floor)
        * Math.pow(D.SANCTUM_MULT, sanctumCount(s.spire.floor))
-       * Math.pow(1.25, s.blessings.vigor || 0);
+       * Math.pow(1.25, s.blessings.vigor || 0)
+       * (rallyActive(s) ? D.RALLY_MULT : 1);
+}
+export function rallyActive(s) {
+  return s.rally && s.stats.playTime < s.rally.activeUntil;
+}
+export function rallyReady(s) {
+  return s.unlocked.rally && s.rally && s.stats.playTime >= s.rally.readyAt;
+}
+export function activateRally(s) {
+  if (!rallyReady(s)) return false;
+  s.rally.activeUntil = s.stats.playTime + D.RALLY_SECS;
+  s.rally.readyAt = s.stats.playTime + D.RALLY_COOLDOWN;
+  return true;
 }
 export function milestoneMult(count) {
   let m = 1;
@@ -426,6 +440,7 @@ function checkUnlocks(s) {
     addLog(s, 'With proper gear, the Spire door can be approached. Expeditions available.');
   }
   if (!u.blessings && s.spire.floor >= 1) { u.blessings = true; addLog(s, 'Essence can be shaped into permanent Blessings.'); }
+  if (!u.rally && s.spire.floor >= 1) { u.rally = true; addLog(s, 'The camp answers a horn from the Gatehouse. You can Rally the camp for bursts of effort.'); }
   if (!u.tier2 && s.spire.floor >= 2) { u.tier2 = true; addLog(s, 'Vault schematics recovered: advanced buildings unlocked.'); }
   if (!u.foreman && s.spire.floor >= 3) { u.foreman = true; addLog(s, 'The ledger-engine hums to life. The Foreman can automate the camp.'); }
   if (!u.autoexpedition && s.spire.floor >= 5) { u.autoexpedition = true; addLog(s, 'Expeditions can now resupply and relaunch themselves.'); }

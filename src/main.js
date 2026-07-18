@@ -59,6 +59,16 @@ setInterval(() => {
   }
 }, TICK_MS);
 
+// Spacebar = gather (unless typing in an input)
+document.addEventListener('keydown', e => {
+  if (e.code !== 'Space') return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  e.preventDefault();
+  E.doClick(S);
+  updateUI();
+});
+
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) SV.save(S);
 });

@@ -68,7 +68,7 @@ else ok('Villagers tab unlocked');
 await page.evaluate(() => new Promise(r => setTimeout(r, 100)));
 
 // save via button, reload, verify persistence
-await page.locator('.savebtns button', { hasText: 'save' }).first().click();
+await page.locator('.savebtns button', { hasText: '💾' }).first().click();
 await page.waitForTimeout(200);
 const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('rootspire-save')));
 if (!saved || (saved.buildings.garden || 0) < 1) fail('save missing garden: ' + JSON.stringify(saved?.buildings));

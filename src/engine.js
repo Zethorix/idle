@@ -32,6 +32,7 @@ export function newState(nowMs) {
       coinsEarned: 0, essenceEarned: 0, rallies: 0,
     },
     log: [],
+    seenTabs: {},
     settings: { buyQty: 1 },
   };
   for (const r of D.RESOURCES) { s.res[r.id] = 0; s.lifetime[r.id] = 0; }
@@ -58,6 +59,13 @@ const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
 export function addLog(s, msg) {
   s.log.push({ t: s.stats ? s.stats.playTime : 0, msg });
   if (s.log.length > 120) s.log.splice(0, s.log.length - 120);
+}
+
+// Transient UI events (toasts/banners). Drained by the UI; capped; never saved.
+export function pushEvent(s, icon, msg, big = false) {
+  if (!s._events) s._events = [];
+  s._events.push({ icon, msg, big });
+  if (s._events.length > 20) s._events.splice(0, s._events.length - 20);
 }
 
 // ---------------------------------------------------------------- multipliers
@@ -218,6 +226,7 @@ export function recruit(s) {
   const name = D.VILLAGER_NAMES[(s.villagers.length * 17 + 5) % D.VILLAGER_NAMES.length];
   s.villagers.push({ name });
   addLog(s, `${name} joins the camp.`);
+  pushEvent(s, '👤', `${name} joins the camp`);
   return true;
 }
 
@@ -349,6 +358,7 @@ export function tick(s, dt) {
       j.xp -= need;
       j.level++;
       info.levelUps.push(jd.id);
+      if (j.level % 10 === 0) pushEvent(s, jd.icon, `${jd.name} reached level ${j.level}!`);
       need = D.xpToNext(j.level);
     }
   }
@@ -417,6 +427,7 @@ function checkAchievements(s) {
     if (!s.achievements[a.id] && a.check(s)) {
       s.achievements[a.id] = true;
       addLog(s, `Achievement — ${a.name}: ${a.desc} (+2% all production, permanent)`);
+      pushEvent(s, '🏆', `${a.name} — +2% production forever`);
     }
   }
 }
@@ -431,37 +442,48 @@ function checkFloor(s) {
     const name = fl ? `${fl.name}` : `Floor ${s.spire.floor}`;
     addLog(s, `Floor ${s.spire.floor} conquered — ${name}. ${fl ? fl.text : ''} ` +
               `(All production ×${D.FLOOR_MULT}${s.spire.floor % 5 === 0 ? `, Sanctum ×${D.SANCTUM_MULT}` : ''})`);
+    pushEvent(s, '🗼', `Floor ${s.spire.floor} conquered — ${name}!`, true);
     need = D.floorNeed(s.spire.floor);
   }
 }
 
 function checkUnlocks(s) {
   const u = s.unlocked;
-  if (!u.buildings && s.lifetime.wood >= 10) {
-    u.buildings = true;
-    addLog(s, 'Enough wood to build with. The camp can grow.');
-  }
-  if (!u.villagers && (s.buildings.garden || 0) >= 1) {
-    u.villagers = true;
-    addLog(s, 'A worked field draws wanderers. You can recruit villagers.');
-  }
-  if (!u.tier1 && s.lifetime.stone >= D.TIER1_UNLOCK_STONE) {
-    u.tier1 = true;
-    addLog(s, 'Cut stone reveals ore seams, game trails, and herb hollows. New jobs and buildings available.');
-  }
-  if (!u.market && anyConverter(s)) {
-    u.market = true;
-    addLog(s, 'Traders arrive to barter. The Market is open.');
-  }
-  if (!u.spire && (s.lifetime.gear || 0) >= 1) {
-    u.spire = true;
-    addLog(s, 'With proper gear, the Spire door can be approached. Expeditions available.');
-  }
-  if (!u.blessings && s.spire.floor >= 1) { u.blessings = true; addLog(s, 'Essence can be shaped into permanent Blessings.'); }
-  if (!u.rally && s.spire.floor >= 1) { u.rally = true; addLog(s, 'The camp answers a horn from the Gatehouse. You can Rally the camp for bursts of effort.'); }
-  if (!u.tier2 && s.spire.floor >= 2) { u.tier2 = true; addLog(s, 'Vault schematics recovered: advanced buildings unlocked.'); }
-  if (!u.foreman && s.spire.floor >= 3) { u.foreman = true; addLog(s, 'The ledger-engine hums to life. The Foreman can automate the camp.'); }
-  if (!u.autoexpedition && s.spire.floor >= 5) { u.autoexpedition = true; addLog(s, 'Expeditions can now resupply and relaunch themselves.'); }
+  const unlock = (key, icon, toast, logMsg) => {
+    u[key] = true;
+    addLog(s, logMsg);
+    pushEvent(s, icon, toast);
+  };
+  if (!u.buildings && s.lifetime.wood >= 10)
+    unlock('buildings', '⛺', 'Camp unlocked — you can build now!',
+      'Enough wood to build with. The camp can grow.');
+  if (!u.villagers && (s.buildings.garden || 0) >= 1)
+    unlock('villagers', '👥', 'Villagers unlocked — recruit workers!',
+      'A worked field draws wanderers. You can recruit villagers.');
+  if (!u.tier1 && s.lifetime.stone >= D.TIER1_UNLOCK_STONE)
+    unlock('tier1', '⛰️', 'Industry unlocked — ore, hides & herbs!',
+      'Cut stone reveals ore seams, game trails, and herb hollows. New jobs and buildings available.');
+  if (!u.market && anyConverter(s))
+    unlock('market', '🏪', 'Market open — trade anything for coins!',
+      'Traders arrive to barter. The Market is open.');
+  if (!u.spire && (s.lifetime.gear || 0) >= 1)
+    unlock('spire', '🗼', 'The Spire awaits — launch expeditions!',
+      'With proper gear, the Spire door can be approached. Expeditions available.');
+  if (!u.blessings && s.spire.floor >= 1)
+    unlock('blessings', '✨', 'Blessings unlocked — spend essence!',
+      'Essence can be shaped into permanent Blessings.');
+  if (!u.rally && s.spire.floor >= 1)
+    unlock('rally', '📯', 'Rally unlocked — burst the whole camp!',
+      'The camp answers a horn from the Gatehouse. You can Rally the camp for bursts of effort.');
+  if (!u.tier2 && s.spire.floor >= 2)
+    unlock('tier2', '🏭', 'Advanced buildings unlocked!',
+      'Vault schematics recovered: advanced buildings unlocked.');
+  if (!u.foreman && s.spire.floor >= 3)
+    unlock('foreman', '📜', 'The Foreman awakens — automate the camp!',
+      'The ledger-engine hums to life. The Foreman can automate the camp.');
+  if (!u.autoexpedition && s.spire.floor >= 5)
+    unlock('autoexpedition', '🧭', 'Expeditions can auto-repeat!',
+      'Expeditions can now resupply and relaunch themselves.');
 }
 function anyConverter(s) {
   for (const k in s.converters) if (s.converters[k].count > 0) return true;

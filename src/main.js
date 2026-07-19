@@ -17,6 +17,7 @@ if (!fresh && S.savedAt) {
   const away = (Date.now() - S.savedAt) / 1000;
   if (away > 30) {
     const report = E.runOffline(S, away);
+    S._events = [];   // the offline report covers these; don't replay toasts
     initUI(S, onPlayerAction);
     showModal('While you were away', offlineReportNode(report), [['Back to work', hideModal]]);
   } else {
@@ -41,6 +42,7 @@ setInterval(() => {
   if (dt > SUSPEND_THRESHOLD) {
     // Tab was suspended for a while — run it as offline time with a report.
     const report = E.runOffline(S, dt);
+    S._events = [];
     showModal('While you were away', offlineReportNode(report), [['Back to work', hideModal]]);
   } else {
     // Catch up in ≤1s slices so long throttled gaps stay accurate.

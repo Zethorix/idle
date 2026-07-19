@@ -21,7 +21,10 @@ from `main` (root). Do not add bundlers or frameworks.
 - Transient state fields start with `_` (stripped on save).
 - Design intent (see DESIGN.md): **no prestige resets, ever** — all meta-progression
   (floors, blessings, achievements) is strictly increasing. Don't add reset mechanics.
-- No animations; progress bars and text only. Keep it cheap in background tabs.
+- Icon-first UI: emojis + colored chips, reading optional. Juice animations (glow, toasts,
+  banners, working-bob) are fine; gameplay animations (moving characters) are not. No
+  derived "time until affordable" estimates — players do their own math. Keep it cheap
+  in background tabs.
 
 ## Balance reference (bot times)
 

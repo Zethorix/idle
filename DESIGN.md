@@ -48,10 +48,18 @@ Every floor conquered permanently empowers the camp below. The Spire never takes
 
 ## UX rules
 
-- No animations. Numbers, text, CSS progress/utilization bars.
+- Icon-first: emojis carry the information; reading is optional. Costs and yields are
+  colored chips (green = affordable, red = not, per resource). Recipes read `6⛰️ + 4🪵 ➜ 1🔩`.
+- "Juice" animations are welcome — hover lifts, glow pulses, working-bob loops, toasts,
+  floor-conquest banners. Gameplay animation (moving characters, combat) is out of scope.
+  `prefers-reduced-motion` disables all of it.
+- Guidance is explicit: a hint bar (`👉 do this next`) with a glow on the exact button it
+  refers to, until the first expedition; newly unlocked tabs pulse until visited; every
+  unlock fires a toast, floor conquests get a banner.
+- No derived time estimates ("affordable in 2m") — players do their own math. Timers on
+  running processes (expedition countdowns, cycle lengths) are fine.
 - Every resource shows net per-second rate; negatives shown in red before they hurt.
 - Buy ×1/×10/×25/Max with closed-form bulk costs (no loops).
-- Payback time shown on generators.
 - Autosave every 10 s to localStorage; export/import save as base64 text.
 - Progressive disclosure: tabs and panels appear only when relevant; once seen, never hidden.
 

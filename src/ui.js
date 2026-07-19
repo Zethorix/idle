@@ -1,15 +1,17 @@
 // Rootspire — DOM rendering. Build-once static structure + cheap per-frame
-// text updates. No animations; progress bars are plain divs.
+// text updates. Icon-first: reading is optional. Progress bars, toasts and
+// small looping "working" animations — no gameplay animations.
 
 import * as D from './data.js';
 import * as E from './engine.js';
-import { fmt, fmtRes, fmtRate, fmtTime, fmtCost } from './format.js';
+import { fmt, fmtRes, fmtRate, fmtTime } from './format.js';
 
 let S;                      // game state (shared reference)
 let onAction = () => {};    // callback after any player action (for saving)
 const $ = {};               // static element refs
-const rows = { res: {}, bld: {}, cvt: {}, job: {}, upg: {}, bls: {}, mkt: {} };
+const rows = { res: {}, bld: {}, cvt: {}, job: {}, upg: {}, bls: {}, mkt: {}, ach: {} };
 let rulesDirty = true, logLen = -1, rosterKey = '';
+let glowEl = null;
 
 // ---------------------------------------------------------------- helpers
 function el(tag, cls, text) {
@@ -23,6 +25,7 @@ function btn(label, cls, fn) {
   b.addEventListener('click', () => { fn(); onAction(); });
   return b;
 }
+function icon(glyph, cls) { return el('span', 'icon ' + (cls || ''), glyph); }
 function bar(cls) {
   const outer = el('div', 'bar ' + (cls || ''));
   const fill = el('div', 'bar-fill');
@@ -45,21 +48,45 @@ function show(node, visible) {
   const want = visible ? '' : 'none';
   if (node.style.display !== want) node.style.display = want;
 }
-function costAffordClass(cost) {
-  return E.canAfford(S, cost) ? 'cost ok' : 'cost no';
-}
-// Longest time until every resource in `cost` is affordable at current rates.
-function timeToAfford(cost) {
-  const rates = S._info?.rates || {};
-  let worst = 0;
+
+// Cost rendered as per-resource chips, each colored by its own affordability.
+// Cached by content key to avoid rebuilding every frame.
+function setCostChips(container, cost, prefix) {
+  let key = prefix || '';
+  for (const k in cost) key += `|${k}:${Math.ceil(cost[k])}:${(S.res[k] || 0) >= cost[k] ? 1 : 0}`;
+  if (container._key === key) return;
+  container._key = key;
+  container.textContent = '';
+  if (prefix) container.appendChild(el('span', 'chip-label', prefix));
   for (const k in cost) {
-    const deficit = cost[k] - (S.res[k] || 0);
-    if (deficit <= 0) continue;
-    const r = rates[k] || 0;
-    if (r <= 0) return Infinity;
-    worst = Math.max(worst, deficit / r);
+    const ok = (S.res[k] || 0) >= cost[k];
+    const c = el('span', 'chip-cost ' + (ok ? 'ok' : 'no'),
+      `${fmt(Math.ceil(cost[k]))} ${D.RES[k].icon}`);
+    c.title = `${fmt(Math.ceil(cost[k]))} ${D.RES[k].name}`;
+    container.appendChild(c);
   }
-  return worst;
+}
+
+// Production shown as chips: +0.4🍎/s
+function setProdChips(container, prod, mult, suffix) {
+  let key = suffix || '';
+  for (const k in prod) key += `|${k}:${(prod[k] * mult).toPrecision(3)}`;
+  if (container._key === key) return;
+  container._key = key;
+  container.textContent = '';
+  for (const k in prod) {
+    const c = el('span', 'chip-prod', `+${fmt(Math.round(prod[k] * mult * 100) / 100)} ${D.RES[k].icon}/s`);
+    c.title = D.RES[k].name;
+    container.appendChild(c);
+  }
+  if (suffix) container.appendChild(el('span', 'chip-label', suffix));
+}
+
+function setGlow(target) {
+  if (glowEl === target) return;
+  if (glowEl) glowEl.classList.remove('glow');
+  glowEl = target;
+  if (glowEl) glowEl.classList.add('glow');
 }
 
 function qtyNum() {
@@ -78,17 +105,25 @@ export function initUI(state, actionCb) {
   const title = el('div', 'title', 'ROOTSPIRE');
   $.floorChip = el('div', 'chip', '');
   $.multChip = el('div', 'chip', '');
-  $.hint = el('div', 'hint', '');
   const spacer = el('div', 'spacer');
   const saveBtns = el('div', 'savebtns');
   saveBtns.append(
-    btn('save', 'small', () => window.dispatchEvent(new Event('rs-save'))),
-    btn('export', 'small', () => window.dispatchEvent(new Event('rs-export'))),
-    btn('import', 'small', () => window.dispatchEvent(new Event('rs-import'))),
-    btn('reset', 'small danger', () => window.dispatchEvent(new Event('rs-reset'))),
+    btn('💾', 'small iconbtn', () => window.dispatchEvent(new Event('rs-save'))),
+    btn('📤 export', 'small', () => window.dispatchEvent(new Event('rs-export'))),
+    btn('📥 import', 'small', () => window.dispatchEvent(new Event('rs-import'))),
+    btn('🗑', 'small danger iconbtn', () => window.dispatchEvent(new Event('rs-reset'))),
   );
-  header.append(title, $.floorChip, $.multChip, $.hint, spacer, saveBtns);
+  saveBtns.children[0].title = 'Save now';
+  saveBtns.children[3].title = 'Hard reset (never required)';
+  header.append(title, $.floorChip, $.multChip, spacer, saveBtns);
   document.body.appendChild(header);
+
+  // Hint banner (tutorial guidance)
+  $.hint = el('div', 'hintbar');
+  $.hintIcon = el('span', 'hint-icon', '👉');
+  $.hintText = el('span', 'hint-text', '');
+  $.hint.append($.hintIcon, $.hintText);
+  document.body.appendChild($.hint);
 
   // Layout
   const layout = el('div', 'layout');
@@ -96,9 +131,9 @@ export function initUI(state, actionCb) {
 
   // Sidebar
   const side = el('aside');
-  $.gather = btn('Gather (+1 food, +1 wood)', 'gather', () => E.doClick(S));
+  $.gather = btn('', 'gather', () => E.doClick(S));
   side.appendChild($.gather);
-  $.rally = btn('Rally the camp', 'gather rally', () => E.activateRally(S));
+  $.rally = btn('', 'gather rally', () => E.activateRally(S));
   side.appendChild($.rally);
   $.rallyBar = bar('rally');
   side.appendChild($.rallyBar);
@@ -124,6 +159,10 @@ export function initUI(state, actionCb) {
   buildForemanPanel();
   buildChroniclePanel();
 
+  // Toasts + banner overlay
+  $.toasts = el('div', 'toasts');
+  document.body.appendChild($.toasts);
+
   // Modal
   $.modal = el('div', 'modal-wrap');
   $.modal.style.display = 'none';
@@ -132,23 +171,29 @@ export function initUI(state, actionCb) {
   $.modal.addEventListener('click', e => { if (e.target === $.modal) hideModal(); });
   document.body.appendChild($.modal);
 
-  selectTab(S._tab || 'camp');
+  selectTab(firstVisibleTab());
   updateUI();
 }
 
 const TABS = [
-  { id: 'camp',      name: 'Camp',      when: s => s.unlocked.buildings },
-  { id: 'jobs',      name: 'Villagers', when: s => s.unlocked.villagers },
-  { id: 'industry',  name: 'Industry',  when: s => s.unlocked.tier1 },
-  { id: 'spire',     name: 'Spire',     when: s => s.unlocked.spire },
-  { id: 'foreman',   name: 'Foreman',   when: s => s.unlocked.foreman },
-  { id: 'chronicle', name: 'Chronicle', when: () => true },
+  { id: 'camp',      name: 'Camp',      icon: '⛺', when: s => s.unlocked.buildings },
+  { id: 'jobs',      name: 'Villagers', icon: '👥', when: s => s.unlocked.villagers },
+  { id: 'industry',  name: 'Industry',  icon: '🏭', when: s => s.unlocked.tier1 },
+  { id: 'spire',     name: 'Spire',     icon: '🗼', when: s => s.unlocked.spire },
+  { id: 'foreman',   name: 'Foreman',   icon: '📜', when: s => s.unlocked.foreman },
+  { id: 'chronicle', name: 'Chronicle', icon: '📖', when: () => true },
 ];
+
+function firstVisibleTab() {
+  for (const t of TABS) if (t.when(S)) return t.id;
+  return 'chronicle';
+}
 
 function makeTabs() {
   $.tabs = {};
   for (const t of TABS) {
-    const b = el('button', 'tab', t.name);
+    const b = el('button', 'tab');
+    b.append(icon(t.icon), el('span', 'tab-name', t.name));
     b.addEventListener('click', () => selectTab(t.id));
     $.tabbar.appendChild(b);
     $.tabs[t.id] = b;
@@ -156,6 +201,7 @@ function makeTabs() {
 }
 function selectTab(id) {
   S._tab = id;
+  S.seenTabs[id] = true;
   for (const t of TABS) {
     $.tabs[t.id].classList.toggle('active', t.id === id);
     show($.panelEls[t.id], t.id === id);
@@ -167,7 +213,6 @@ $.panelEls = {};
 function panel(id) {
   const p = el('section', 'panel');
   $.panelEls[id] = p;
-  // panels object may not exist yet during initUI ordering; append later
   return p;
 }
 
@@ -185,7 +230,6 @@ function buildCampPanel() {
   const p = panel('camp');
   $.panels.appendChild(p);
 
-  // Buy-quantity selector
   const qtyRow = el('div', 'qty-row');
   qtyRow.appendChild(el('span', 'qty-label', 'Buy'));
   $.qtyBtns = {};
@@ -197,8 +241,8 @@ function buildCampPanel() {
   }
   p.appendChild(qtyRow);
 
-  $.bldSection = section(p, 'Buildings');
-  $.upgSection = section(p, 'Upgrades');
+  $.bldSection = section(p, '⛺ Buildings');
+  $.upgSection = section(p, '⭐ Upgrades');
 
   for (const b of D.BUILDINGS) {
     const r = buildingRow(b);
@@ -214,67 +258,61 @@ function buildCampPanel() {
 
 function buildingRow(b) {
   const root = el('div', 'card');
+  const av = icon(b.icon, 'avatar');
+  av.title = b.desc;
+  const body = el('div', 'card-body');
   const top = el('div', 'card-top');
   const name = el('span', 'card-name', b.name);
+  name.title = b.desc;
   const owned = el('span', 'owned', '');
   const buy = btn('Buy', 'buy', () => E.buyBuilding(S, b.id, qtyNum()));
   top.append(name, owned, el('span', 'spacer'), buy);
-  root.appendChild(top);
-  const desc = el('div', 'card-desc', b.desc);
-  root.appendChild(desc);
-  const prod = el('div', 'card-info', '');
-  root.appendChild(prod);
-  const cost = el('div', 'card-info', '');
-  root.appendChild(cost);
-  return { root, owned, buy, prod, cost, def: b };
+  const prod = el('div', 'chips');
+  const cost = el('div', 'chips');
+  body.append(top, prod, cost);
+  root.append(av, body);
+  return { root, av, owned, buy, prod, cost, def: b };
 }
 
 function updateBuildingRow(r) {
   const b = r.def;
-  const visible = (!b.unlock || b.unlock(S) || (S.buildings[b.id] || 0) > 0);
+  const count = S.buildings[b.id] || 0;
+  const visible = count > 0 || !b.unlock || b.unlock(S);
   show(r.root, visible);
   if (!visible) return;
-  const count = S.buildings[b.id] || 0;
-  setText(r.owned, count ? `× ${count}` : '');
+  setText(r.owned, count ? `×${count}` : '');
+  r.av.classList.toggle('working', count > 0 && Object.keys(b.prod).length > 0);
 
-  const parts = [];
   if (Object.keys(b.prod).length) {
     const bm = E.buildingMult(S) * E.milestoneMult(count);
-    const per = Object.entries(b.prod)
-      .map(([k, v]) => `${fmtRate(v * bm)} ${D.RES[k].name}`).join(', ');
-    parts.push(`each: ${per}`);
     const nm = E.nextMilestone(count);
-    if (nm) parts.push(`×2 at ${nm} owned`);
+    setProdChips(r.prod, b.prod, bm, nm ? `each · ⬆ ×2 at ${nm}` : 'each');
+  } else if (b.housing) {
+    setProdChips(r.prod, {}, 1, `+${b.housing} 🏠 housing each`);
   }
-  if (b.housing) parts.push(`+${b.housing} housing each`);
-  setText(r.prod, parts.join(' · '));
 
   const q = qtyNum();
   const n = q === 'max' ? Math.max(1, E.maxAffordable(S, b.cost, b.costMult, count)) : q;
   const cost = E.bulkCost(b.cost, b.costMult, count, n);
   const afford = E.canAfford(S, cost);
-  let costText = `cost ×${n}: ${fmtCost(cost, D.RES)}`;
-  if (!afford) {
-    const t = timeToAfford(cost);
-    costText += isFinite(t) ? ` — ready in ${fmtTime(t)}` : '';
-  }
-  setText(r.cost, costText);
-  r.cost.className = afford ? 'card-info cost-ok' : 'card-info cost-no';
+  setCostChips(r.cost, cost);
   r.buy.disabled = !afford;
-  setText(r.buy, q === 'max' ? `Buy ${n}` : `Buy ${n}`);
+  setText(r.buy, `Buy ${n}`);
 }
 
 function upgradeRow(u) {
   const root = el('div', 'card');
+  const av = icon(u.icon, 'avatar');
+  const body = el('div', 'card-body');
   const top = el('div', 'card-top');
   const name = el('span', 'card-name', u.name);
   const tier = el('span', 'owned', '');
   const buy = btn('Buy', 'buy', () => E.buyUpgrade(S, u.id));
   top.append(name, tier, el('span', 'spacer'), buy);
-  root.appendChild(top);
-  root.appendChild(el('div', 'card-desc', u.desc));
-  const cost = el('div', 'card-info', '');
-  root.appendChild(cost);
+  const desc = el('div', 'card-desc', u.desc);
+  const cost = el('div', 'chips');
+  body.append(top, desc, cost);
+  root.append(av, body);
   return { root, tier, buy, cost, def: u };
 }
 
@@ -284,19 +322,18 @@ function updateUpgradeRow(r) {
   const visible = bought > 0 || !u.unlock || u.unlock(S);
   show(r.root, visible);
   if (!visible) return;
-  setText(r.tier, u.tiers > 1 ? `${bought}/${u.tiers}` : (bought ? 'owned' : ''));
+  setText(r.tier, u.tiers > 1 ? `${bought}/${u.tiers}` : (bought ? '✓' : ''));
   if (bought >= u.tiers) {
-    setText(r.cost, 'complete');
-    r.cost.className = 'card-info cost-done';
+    r.cost.textContent = '';
+    r.cost._key = 'done';
+    r.cost.appendChild(el('span', 'chip-done', '✓ complete'));
     r.buy.disabled = true;
     setText(r.buy, 'Max');
     return;
   }
   const cost = u.cost(bought);
-  const afford = E.canAfford(S, cost);
-  setText(r.cost, `cost: ${fmtCost(cost, D.RES)}`);
-  r.cost.className = afford ? 'card-info cost-ok' : 'card-info cost-no';
-  r.buy.disabled = !afford;
+  setCostChips(r.cost, cost);
+  r.buy.disabled = !E.canAfford(S, cost);
   setText(r.buy, 'Buy');
 }
 
@@ -305,21 +342,23 @@ function buildJobsPanel() {
   const p = panel('jobs');
   $.panels.appendChild(p);
 
-  const recSec = section(p, 'Camp roster');
+  const recSec = section(p, '👥 Camp roster');
   const recRow = el('div', 'card');
+  const av = icon('🏕️', 'avatar');
+  const body = el('div', 'card-body');
   const top = el('div', 'card-top');
   $.villCount = el('span', 'card-name', '');
-  $.recruitBtn = btn('Recruit', 'buy', () => E.recruit(S));
+  $.recruitBtn = btn('➕ Recruit', 'buy', () => E.recruit(S));
   top.append($.villCount, el('span', 'spacer'), $.recruitBtn);
-  recRow.appendChild(top);
-  $.recruitCost = el('div', 'card-info', '');
-  recRow.appendChild($.recruitCost);
+  $.recruitCost = el('div', 'chips');
+  body.append(top, $.recruitCost);
+  recRow.append(av, body);
   recSec.appendChild(recRow);
   $.roster = el('div', 'roster', '');
   recSec.appendChild($.roster);
 
-  const jobSec = section(p, 'Jobs',
-    'Assign villagers to work. Jobs level up with time worked; each level compounds yield ×1.06.');
+  const jobSec = section(p, '🛠 Jobs',
+    'Jobs level up with time worked; each level compounds yield ×1.06.');
   for (const j of D.JOBS) {
     const r = jobRow(j);
     jobSec.appendChild(r.root);
@@ -329,6 +368,8 @@ function buildJobsPanel() {
 
 function jobRow(j) {
   const root = el('div', 'card');
+  const av = icon(j.icon, 'avatar');
+  const body = el('div', 'card-body');
   const top = el('div', 'card-top');
   const name = el('span', 'card-name', j.name);
   const lvl = el('span', 'owned', '');
@@ -337,17 +378,16 @@ function jobRow(j) {
   const plus = btn('+', 'adj', () => E.assignJob(S, j.id, +1));
   const plus5 = btn('+5', 'adj', () => E.assignJob(S, j.id, +5));
   top.append(name, lvl, el('span', 'spacer'), minus, count, plus, plus5);
-  root.appendChild(top);
-  const info = el('div', 'card-info', '');
-  root.appendChild(info);
+  const info = el('div', 'chips');
   const xpBar = bar('xp');
-  root.appendChild(xpBar);
-  const equipRow = el('div', 'card-top');
-  const equipInfo = el('div', 'card-info', '');
+  const equipRow = el('div', 'card-top equip-row');
+  const equipIcon = icon('⚒', 'small-icon');
+  const equipInfo = el('div', 'chips');
   const equipBtn = btn('Upgrade', 'buy small', () => E.buyEquip(S, j.id));
-  equipRow.append(equipInfo, el('span', 'spacer'), equipBtn);
-  root.appendChild(equipRow);
-  return { root, lvl, count, info, xpBar, equipInfo, equipBtn, minus, plus, plus5, def: j };
+  equipRow.append(equipIcon, equipInfo, el('span', 'spacer'), equipBtn);
+  body.append(top, info, xpBar, equipRow);
+  root.append(av, body);
+  return { root, av, lvl, count, info, xpBar, equipInfo, equipBtn, minus, plus, plus5, def: j };
 }
 
 function updateJobRow(r) {
@@ -358,10 +398,9 @@ function updateJobRow(r) {
   if (!visible) return;
   setText(r.lvl, `Lv ${js.level}`);
   setText(r.count, String(js.assigned));
+  r.av.classList.toggle('working', js.assigned > 0);
   const ym = E.jobYieldMult(S, j.id);
-  const per = Object.entries(j.yield)
-    .map(([k, v]) => `${fmtRate(v * ym)} ${D.RES[k].name}`).join(', ');
-  setText(r.info, `each villager: ${per}`);
+  setProdChips(r.info, j.yield, ym, 'each');
   const need = D.xpToNext(js.level);
   setBar(r.xpBar, js.xp / need, `XP ${fmt(Math.floor(js.xp))} / ${fmt(need)}`);
   const idle = E.idleVillagers(S);
@@ -369,45 +408,45 @@ function updateJobRow(r) {
   r.plus5.disabled = idle < 1;
   r.minus.disabled = js.assigned < 1;
 
-  const eq = D.JOB_EQUIP[j.id];
   const tier = S.equip[j.id] || 0;
   const cost = E.equipCost(S, j.id);
-  const afford = E.canAfford(S, cost);
-  setText(r.equipInfo, `${eq.name} tier ${tier} — next: ×2 yield, ${fmtCost(cost, D.RES)}`);
-  r.equipInfo.className = afford ? 'card-info cost-ok' : 'card-info cost-no';
-  r.equipBtn.disabled = !afford;
+  setCostChips(r.equipInfo, cost, `${D.JOB_EQUIP[j.id].name} T${tier} → ×2:`);
+  r.equipBtn.disabled = !E.canAfford(S, cost);
 }
 
 function updateRoster() {
-  // Assign villagers to jobs in roster order for display flavor.
   const names = S.villagers.map(v => v.name);
-  const assignment = [];
+  const entries = [];
   let i = 0;
   for (const j of D.JOBS) {
     for (let k = 0; k < S.jobs[j.id].assigned && i < names.length; k++, i++) {
-      assignment.push(`${names[i]} — ${j.verb}`);
+      entries.push([j.icon, names[i], true]);
     }
   }
-  for (; i < names.length; i++) assignment.push(`${names[i]} — idle`);
-  const key = assignment.join('|');
+  for (; i < names.length; i++) entries.push(['💤', names[i], false]);
+  const key = entries.map(e => e[0] + e[1]).join('|');
   if (key === rosterKey) return;
   rosterKey = key;
   $.roster.textContent = '';
-  for (const a of assignment) $.roster.appendChild(el('div', 'roster-row', a));
+  for (const [ic, name, working] of entries) {
+    const row = el('div', 'roster-row');
+    row.append(icon(ic, working ? 'working' : ''), el('span', null, ' ' + name));
+    $.roster.appendChild(row);
+  }
 }
 
 // ----- Industry
 function buildIndustryPanel() {
   const p = panel('industry');
   $.panels.appendChild(p);
-  $.cvtSection = section(p, 'Converters',
-    'Converters run continuously while inputs last. The bar shows utilization.');
+  $.cvtSection = section(p, '⚙️ Converters',
+    'Converters run while inputs last — the bar shows how well they are fed.');
   for (const c of D.CONVERTERS) {
     const r = converterRow(c);
     $.cvtSection.appendChild(r.root);
     rows.cvt[c.id] = r;
   }
-  $.mktSection = section(p, 'Market', 'Traders buy anything. They sell at 4× the price.');
+  $.mktSection = section(p, '🏪 Market', 'Traders buy anything. They sell at 4× the price.');
   $.mktTable = el('table', 'mkt-table');
   $.mktSection.appendChild($.mktTable);
   for (const r of D.RESOURCES) {
@@ -418,26 +457,49 @@ function buildIndustryPanel() {
   }
 }
 
+function recipeNode(c) {
+  const box = el('span', 'recipe');
+  let first = true;
+  for (const k in c.input) {
+    if (!first) box.appendChild(el('span', 'recipe-plus', '+'));
+    first = false;
+    const chip = el('span', 'chip-cost neutral', `${fmt(c.input[k])} ${D.RES[k].icon}`);
+    chip.title = D.RES[k].name;
+    box.appendChild(chip);
+  }
+  box.appendChild(el('span', 'recipe-arrow', '➜'));
+  for (const k in c.output) {
+    const chip = el('span', 'chip-prod', `${fmt(c.output[k])} ${D.RES[k].icon}`);
+    chip.title = D.RES[k].name;
+    box.appendChild(chip);
+  }
+  return box;
+}
+
 function converterRow(c) {
   const root = el('div', 'card');
+  const av = icon(c.icon, 'avatar');
+  av.title = c.desc;
+  const body = el('div', 'card-body');
   const top = el('div', 'card-top');
   const name = el('span', 'card-name', c.name);
+  name.title = c.desc;
   const owned = el('span', 'owned', '');
-  const toggle = btn('on', 'toggle', () => {
+  const toggle = btn('⏻ on', 'toggle', () => {
     const cv = S.converters[c.id];
     if (cv) cv.on = !cv.on;
   });
   const buy = btn('Buy', 'buy', () => E.buyConverter(S, c.id, qtyNum()));
   top.append(name, owned, toggle, el('span', 'spacer'), buy);
-  root.appendChild(top);
-  root.appendChild(el('div', 'card-desc', c.desc));
-  const io = el('div', 'card-info', '');
-  root.appendChild(io);
+  const io = el('div', 'chips');
+  io.appendChild(recipeNode(c));
+  const cycle = el('span', 'chip-label', '');
+  io.appendChild(cycle);
   const util = bar('util');
-  root.appendChild(util);
-  const cost = el('div', 'card-info', '');
-  root.appendChild(cost);
-  return { root, owned, toggle, buy, io, util, cost, def: c };
+  const cost = el('div', 'chips');
+  body.append(top, io, util, cost);
+  root.append(av, body);
+  return { root, av, owned, toggle, buy, cycle, util, cost, def: c };
 }
 
 function updateConverterRow(r) {
@@ -447,33 +509,31 @@ function updateConverterRow(r) {
   const visible = count > 0 || !c.unlock || c.unlock(S);
   show(r.root, visible);
   if (!visible) return;
-  setText(r.owned, count ? `× ${count}` : '');
+  setText(r.owned, count ? `×${count}` : '');
   show(r.toggle, count > 0);
+  const u = S._info?.util?.[c.id] ?? 0;
+  r.av.classList.toggle('working', count > 0 && !!cv?.on && u > 0.01);
   if (count) {
-    setText(r.toggle, cv.on ? 'on' : 'off');
+    setText(r.toggle, cv.on ? '⏻ on' : '⏻ off');
     r.toggle.classList.toggle('off', !cv.on);
   }
   const speed = E.converterSpeedMult(S);
-  const inS = Object.entries(c.input).map(([k, v]) => `${fmt(v)} ${D.RES[k].name}`).join(' + ');
-  const outS = Object.entries(c.output).map(([k, v]) => `${fmt(v)} ${D.RES[k].name}`).join(' + ');
-  setText(r.io, `${inS} → ${outS} every ${fmtTime(c.cycle / speed)} (each)`);
-  const u = S._info?.util?.[c.id] ?? 0;
+  setText(r.cycle, `⏱ ${fmtTime(c.cycle / speed)} each`);
   show(r.util, count > 0);
-  if (count) setBar(r.util, u, cv.on ? `${Math.round(u * 100)}% utilization` : 'off');
+  if (count) setBar(r.util, cv.on ? u : 0, cv.on ? `${Math.round(u * 100)}% fed` : 'off');
 
   const q = qtyNum();
   const n = q === 'max' ? Math.max(1, E.maxAffordable(S, c.cost, c.costMult, count)) : q;
   const cost = E.bulkCost(c.cost, c.costMult, count, n);
-  const afford = E.canAfford(S, cost);
-  setText(r.cost, `cost ×${n}: ${fmtCost(cost, D.RES)}`);
-  r.cost.className = afford ? 'card-info cost-ok' : 'card-info cost-no';
-  r.buy.disabled = !afford;
+  setCostChips(r.cost, cost);
+  r.buy.disabled = !E.canAfford(S, cost);
   setText(r.buy, `Buy ${n}`);
 }
 
 function marketRow(res) {
   const root = el('tr');
-  const name = el('td', 'mkt-name', res.name);
+  const name = el('td', 'mkt-name');
+  name.append(icon(res.icon), el('span', null, ' ' + res.name));
   const price = el('td', 'mkt-price', '');
   const cells = el('td', 'mkt-btns');
   const mk = (label, fn) => cells.appendChild(btn(label, 'small', fn));
@@ -490,7 +550,7 @@ function updateMarketRow(r) {
   show(r.root, visible);
   if (!visible) return;
   const p = D.SELL_PRICE[r.def.id] * E.sellPriceMult(S);
-  setText(r.price, `${fmt(p)}c / buy ${fmt(D.SELL_PRICE[r.def.id] * D.BUY_MARKUP)}c`);
+  setText(r.price, `${fmt(p)} 🪙 · buy ${fmt(D.SELL_PRICE[r.def.id] * D.BUY_MARKUP)} 🪙`);
 }
 
 // ----- Spire
@@ -498,33 +558,33 @@ function buildSpirePanel() {
   const p = panel('spire');
   $.panels.appendChild(p);
 
-  const climb = section(p, 'The Climb');
+  const climb = section(p, '🗼 The Climb');
   $.floorTitle = el('div', 'floor-title', '');
   climb.appendChild($.floorTitle);
   $.floorText = el('div', 'card-desc', '');
   climb.appendChild($.floorText);
   $.floorBar = bar('floor');
   climb.appendChild($.floorBar);
-  $.floorReward = el('div', 'card-info', '');
+  $.floorReward = el('div', 'chips');
   climb.appendChild($.floorReward);
 
-  const exp = section(p, 'Expedition');
-  $.expInfo = el('div', 'card-info', '');
-  exp.appendChild($.expInfo);
+  const exp = section(p, '🧭 Expedition');
+  $.expCost = el('div', 'chips');
+  exp.appendChild($.expCost);
   $.expBar = bar('exp');
   exp.appendChild($.expBar);
   const row = el('div', 'card-top');
-  $.expBtn = btn('Launch expedition', 'buy big', () => E.launchExpedition(S));
+  $.expBtn = btn('🧭 Launch expedition', 'buy big', () => E.launchExpedition(S));
   $.expAuto = el('label', 'auto-label');
   $.expAutoBox = el('input');
   $.expAutoBox.type = 'checkbox';
   $.expAutoBox.addEventListener('change', () => { S.spire.autoRepeat = $.expAutoBox.checked; });
-  $.expAuto.append($.expAutoBox, document.createTextNode(' auto-repeat'));
+  $.expAuto.append($.expAutoBox, document.createTextNode(' 🔁 auto-repeat'));
   row.append($.expBtn, $.expAuto);
   exp.appendChild(row);
 
-  $.blsSection = section(p, 'Blessings',
-    'Permanent. Essence spent here is never lost to a reset — there are no resets.');
+  $.blsSection = section(p, '✨ Blessings',
+    'Permanent. There are no resets in Rootspire — essence spent here is never lost.');
   for (const b of D.BLESSINGS) {
     const r = blessingRow(b);
     $.blsSection.appendChild(r.root);
@@ -534,15 +594,17 @@ function buildSpirePanel() {
 
 function blessingRow(b) {
   const root = el('div', 'card');
+  const av = icon(b.icon, 'avatar');
+  const body = el('div', 'card-body');
   const top = el('div', 'card-top');
   const name = el('span', 'card-name', b.name);
   const rank = el('span', 'owned', '');
   const buy = btn('Buy', 'buy', () => E.buyBlessing(S, b.id));
   top.append(name, rank, el('span', 'spacer'), buy);
-  root.appendChild(top);
-  root.appendChild(el('div', 'card-desc', b.desc));
-  const cost = el('div', 'card-info', '');
-  root.appendChild(cost);
+  const desc = el('div', 'card-desc', b.desc);
+  const cost = el('div', 'chips');
+  body.append(top, desc, cost);
+  root.append(av, body);
   return { root, rank, buy, cost, def: b };
 }
 
@@ -551,16 +613,15 @@ function updateBlessingRow(r) {
   const rank = S.blessings[b.id] || 0;
   setText(r.rank, `rank ${rank}${b.max ? '/' + b.max : ''}`);
   if (b.max && rank >= b.max) {
-    setText(r.cost, 'complete');
-    r.cost.className = 'card-info cost-done';
+    r.cost.textContent = '';
+    r.cost._key = 'done';
+    r.cost.appendChild(el('span', 'chip-done', '✓ complete'));
     r.buy.disabled = true;
     return;
   }
-  const cost = D.blessingCost(b, rank);
-  const afford = (S.res.essence || 0) >= cost;
-  setText(r.cost, `cost: ${fmt(cost)} Essence`);
-  r.cost.className = afford ? 'card-info cost-ok' : 'card-info cost-no';
-  r.buy.disabled = !afford;
+  const cost = { essence: D.blessingCost(b, rank) };
+  setCostChips(r.cost, cost);
+  r.buy.disabled = (S.res.essence || 0) < cost.essence;
 }
 
 function updateSpirePanel() {
@@ -569,32 +630,36 @@ function updateSpirePanel() {
   setText($.floorTitle, `Floor ${f + 1}${fl ? ' — ' + fl.name : ''}`);
   setText($.floorText, f === 0
     ? 'The first door stands open. Progress is permanent: each floor conquered empowers everything, forever.'
-    : `Conquered floors: ${f}. Every floor multiplies all production ×${D.FLOOR_MULT}, every 5th ×${D.SANCTUM_MULT} more.`);
+    : `Conquered floors: ${f}. Every floor ×${D.FLOOR_MULT} to everything, every 5th ×${D.SANCTUM_MULT} more.`);
   const need = D.floorNeed(f);
   setBar($.floorBar, S.spire.progress / need,
-    `progress ${fmt(Math.floor(S.spire.progress))} / ${fmt(need)}`);
-  setText($.floorReward,
-    `on completion: all production ×${D.FLOOR_MULT}` +
-    ((f + 1) % 5 === 0 ? ` ×${D.SANCTUM_MULT} (Sanctum)` : '') +
-    `, +${fmt(D.floorEssence(f))} Essence` +
-    (D.FLOORS[f + 1]?.grant ? ', new capability' : ''));
+    `⚑ ${fmt(Math.floor(S.spire.progress))} / ${fmt(need)}`);
+
+  // reward chips
+  let rkey = `f${f}`;
+  if ($.floorReward._key !== rkey) {
+    $.floorReward._key = rkey;
+    $.floorReward.textContent = '';
+    $.floorReward.appendChild(el('span', 'chip-label', 'on completion:'));
+    $.floorReward.appendChild(el('span', 'chip-prod', `📈 ×${D.FLOOR_MULT}`));
+    if ((f + 1) % 5 === 0) $.floorReward.appendChild(el('span', 'chip-prod', `🌟 ×${D.SANCTUM_MULT} Sanctum`));
+    $.floorReward.appendChild(el('span', 'chip-prod', `+${fmt(D.floorEssence(f))} ✨`));
+    if (D.FLOORS[f + 1]?.grant) $.floorReward.appendChild(el('span', 'chip-prod', '🎁 new capability'));
+  }
 
   const exp = S.spire.exp;
   if (exp) {
-    setBar($.expBar, 1 - exp.remaining / exp.duration,
-      `returning in ${fmtTime(exp.remaining)}`);
-    setText($.expInfo, `Expedition on floor ${exp.floor + 1} — will add ${fmt(exp.progress)} progress, +${fmt(D.expeditionEssence(exp.floor))} Essence.`);
+    setBar($.expBar, 1 - exp.remaining / exp.duration, `🥾 returning in ${fmtTime(exp.remaining)}`);
+    setCostChips($.expCost, {}, `underway — will add ⚑ ${fmt(exp.progress)} · +${fmt(D.expeditionEssence(exp.floor))} ✨`);
     $.expBtn.disabled = true;
-    setText($.expBtn, 'Expedition underway…');
+    setText($.expBtn, '🧭 Expedition underway…');
   } else {
     const cost = D.expeditionCost(f, S);
-    const afford = E.canAfford(S, cost);
     setBar($.expBar, 0, 'no expedition underway');
-    setText($.expInfo,
-      `Next expedition: ${fmtCost(cost, D.RES)} · ${fmtTime(D.expeditionDuration(f))} · ` +
-      `+${fmt(D.expeditionProgress(f, S))} progress · +${fmt(D.expeditionEssence(f))} Essence`);
-    $.expBtn.disabled = !afford;
-    setText($.expBtn, 'Launch expedition');
+    setCostChips($.expCost, cost,
+      `${fmtTime(D.expeditionDuration(f))} · ⚑ +${fmt(D.expeditionProgress(f, S))} · +${fmt(D.expeditionEssence(f))} ✨ · costs:`);
+    $.expBtn.disabled = !E.canAfford(S, cost);
+    setText($.expBtn, '🧭 Launch expedition');
   }
   show($.expAuto, S.unlocked.autoexpedition);
   $.expAutoBox.checked = !!S.spire.autoRepeat;
@@ -609,9 +674,9 @@ function updateSpirePanel() {
 function buildForemanPanel() {
   const p = panel('foreman');
   $.panels.appendChild(p);
-  const sec = section(p, 'The Foreman',
+  const sec = section(p, '📜 The Foreman',
     'Rules run once per second, top to bottom. Each rule acts at most once per second.');
-  $.ruleSlots = el('div', 'card-info', '');
+  $.ruleSlots = el('div', 'card-desc', '');
   sec.appendChild($.ruleSlots);
   $.rulesBox = el('div', 'rules');
   sec.appendChild($.rulesBox);
@@ -648,8 +713,8 @@ function numInput(value, onChange) {
 function rebuildRules() {
   rulesDirty = false;
   $.rulesBox.textContent = '';
-  const resOpts = [['always', 'always'], ...D.RESOURCES.map(r => [r.id, r.name])];
-  const actOpts = D.RULE_ACTIONS.map(a => [a.id, a.name]);
+  const resOpts = [['always', '∞ always'], ...D.RESOURCES.map(r => [r.id, `${r.icon} ${r.name}`])];
+  const actOpts = D.RULE_ACTIONS.map(a => [a.id, `${a.icon} ${a.name}`]);
   S.rules.forEach((r, i) => {
     const row = el('div', 'rule');
     const en = el('input');
@@ -669,15 +734,15 @@ function rebuildRules() {
 
     const t = r.action.type;
     if (t === 'buyBuilding') {
-      const opts = D.BUILDINGS.map(b => [b.id, b.name]);
+      const opts = D.BUILDINGS.map(b => [b.id, `${b.icon} ${b.name}`]);
       if (!D.BUILDING[r.action.target]) r.action.target = 'garden';
       row.appendChild(sel(opts, r.action.target, v => { r.action.target = v; }));
     } else if (t === 'buyConverter') {
-      const opts = D.CONVERTERS.map(c => [c.id, c.name]);
+      const opts = D.CONVERTERS.map(c => [c.id, `${c.icon} ${c.name}`]);
       if (!D.CONVERTER[r.action.target]) r.action.target = 'smelter';
       row.appendChild(sel(opts, r.action.target, v => { r.action.target = v; }));
     } else if (t === 'sellSurplus') {
-      const opts = D.RESOURCES.filter(x => D.SELL_PRICE[x.id]).map(x => [x.id, x.name]);
+      const opts = D.RESOURCES.filter(x => D.SELL_PRICE[x.id]).map(x => [x.id, `${x.icon} ${x.name}`]);
       if (!D.SELL_PRICE[r.action.target]) r.action.target = 'wood';
       row.appendChild(sel(opts, r.action.target, v => { r.action.target = v; }));
       row.appendChild(el('span', 'rule-kw', 'keep'));
@@ -694,7 +759,7 @@ function rebuildRules() {
 
 function updateForemanPanel() {
   const slots = E.ruleSlots(S);
-  setText($.ruleSlots, `${S.rules.length} / ${slots} rule slots (more via Blessing of Foresight)`);
+  setText($.ruleSlots, `${S.rules.length} / ${slots} rule slots (more via 👁️ Blessing of Foresight)`);
   $.addRule.disabled = S.rules.length >= slots;
   if (rulesDirty) rebuildRules();
 }
@@ -703,26 +768,27 @@ function updateForemanPanel() {
 function buildChroniclePanel() {
   const p = panel('chronicle');
   $.panels.appendChild(p);
-  $.statsSection = section(p, 'Statistics');
+  $.statsSection = section(p, '📊 Statistics');
   $.statsBox = el('div', 'stats');
   $.statsSection.appendChild($.statsBox);
 
-  $.achSection = section(p, 'Achievements', 'Each achievement: +2% all production, forever.');
-  $.achCount = el('div', 'card-info', '');
+  $.achSection = section(p, '🏆 Achievements', 'Each achievement: +2% all production, forever.');
+  $.achCount = el('div', 'card-desc', '');
   $.achSection.appendChild($.achCount);
   const grid = el('div', 'ach-grid');
   $.achSection.appendChild(grid);
-  rows.ach = {};
   for (const a of D.ACHIEVEMENTS) {
     const cell = el('div', 'ach');
-    cell.appendChild(el('div', 'ach-name', a.name));
+    const nameRow = el('div', 'ach-name');
+    nameRow.append(el('span', 'ach-badge', '🏆'), el('span', null, ' ' + a.name));
+    cell.appendChild(nameRow);
     cell.appendChild(el('div', 'ach-desc', a.desc));
     cell.title = a.desc;
     grid.appendChild(cell);
     rows.ach[a.id] = cell;
   }
 
-  const logSec = section(p, 'Chronicle');
+  const logSec = section(p, '📖 Chronicle');
   $.logBox = el('div', 'log');
   logSec.appendChild($.logBox);
 
@@ -755,45 +821,100 @@ function updateChronicle() {
 
   const st = S.stats;
   $.statsBox.textContent =
-    `play time ${fmtTime(st.playTime)} · clicks ${fmt(st.clicks)} · ` +
-    `expeditions ${fmt(st.expeditions)} · floors ${S.spire.floor} · ` +
-    `coins earned ${fmt(st.coinsEarned)} · essence earned ${fmt(st.essenceEarned)} · ` +
-    `offline cap ${fmtTime(E.offlineCapSecs(S))}`;
+    `⏱ ${fmtTime(st.playTime)} · 👐 ${fmt(st.clicks)} gathers · ` +
+    `🧭 ${fmt(st.expeditions)} expeditions · 🗼 floor ${S.spire.floor} · ` +
+    `🪙 ${fmt(st.coinsEarned)} earned · ✨ ${fmt(st.essenceEarned)} earned · ` +
+    `😴 offline cap ${fmtTime(E.offlineCapSecs(S))}`;
 }
 
-// ---------------------------------------------------------------- hint
+// ---------------------------------------------------------------- hint / tutorial
 function currentHint() {
   const u = S.unlocked;
-  if (!u.buildings) return 'Gather wood.';
-  if (!(S.buildings.garden > 0)) return 'Build a Garden.';
-  if (!u.villagers) return 'Build a Garden to attract villagers.';
-  if (S.villagers.length < 2 && E.housingCap(S) >= 2) return 'Recruit a villager (Villagers tab).';
-  if (!u.tier1) return 'Quarry stone to survey the surroundings.';
-  if (u.tier1 && !anyCvt()) return 'Build a converter (Industry tab).';
-  if (!u.spire) return 'Craft Gear at a Forge (Workshop → Forge) to approach the Spire.';
-  if (u.spire && S.spire.floor === 0 && !S.spire.exp) return 'Launch an expedition into the Spire.';
-  return '';
+  if (!u.buildings) return { text: 'Gather wood!', el: $.gather };
+  if (!S.seenTabs.camp) return { text: 'The Camp is open — take a look!', el: $.tabs.camp };
+  if (!(S.buildings.garden > 0)) {
+    return S._tab === 'camp'
+      ? { text: 'Build a Garden.', el: rows.bld.garden.buy }
+      : { text: 'Build a Garden in the Camp.', el: $.tabs.camp };
+  }
+  if (u.villagers && !S.seenTabs.jobs) return { text: 'Wanderers approach — meet your Villagers!', el: $.tabs.jobs };
+  if (S.villagers.length < 2) {
+    return S._tab === 'jobs'
+      ? { text: 'Recruit a villager.', el: $.recruitBtn }
+      : { text: 'Recruit a villager in the Villagers tab.', el: $.tabs.jobs };
+  }
+  if (!u.tier1) return { text: 'Quarry stone to survey the wider world.', el: S._tab === 'jobs' ? rows.job.quarry?.plus : $.tabs.jobs };
+  if (!S.seenTabs.industry && u.tier1) return { text: 'Industry unlocked — build converters!', el: $.tabs.industry };
+  if (!anyCvt()) return { text: 'Build a Smelter.', el: S._tab === 'industry' ? rows.cvt.smelter?.buy : $.tabs.industry };
+  if (!u.spire) return { text: 'Craft ⚔️ Gear: Smelter → Workshop → Forge.', el: S._tab === 'industry' ? null : $.tabs.industry };
+  if (!S.seenTabs.spire) return { text: 'The Spire door stands open…', el: $.tabs.spire };
+  if (S.spire.floor === 0 && !S.spire.exp) {
+    return S._tab === 'spire'
+      ? { text: 'Launch an expedition!', el: $.expBtn.disabled ? null : $.expBtn }
+      : { text: 'Launch an expedition into the Spire.', el: $.tabs.spire };
+  }
+  return null;
 }
 function anyCvt() {
   for (const k in S.converters) if (S.converters[k].count > 0) return true;
   return false;
 }
 
+// ---------------------------------------------------------------- toasts & banner
+function drainEvents() {
+  const evs = S._events;
+  if (!evs || !evs.length) return;
+  S._events = [];
+  for (const ev of evs) {
+    if (ev.big) showBanner(ev.icon, ev.msg);
+    toast(ev.icon, ev.msg);
+  }
+}
+
+export function toast(glyph, msg) {
+  const t = el('div', 'toast');
+  t.append(el('span', 'toast-icon', glyph), el('span', 'toast-msg', msg));
+  $.toasts.appendChild(t);
+  while ($.toasts.children.length > 5) $.toasts.firstChild.remove();
+  setTimeout(() => {
+    t.classList.add('out');
+    setTimeout(() => t.remove(), 400);
+  }, 4500);
+}
+
+function showBanner(glyph, msg) {
+  const b = el('div', 'banner');
+  b.append(el('div', 'banner-icon', glyph), el('div', 'banner-msg', msg));
+  document.body.appendChild(b);
+  setTimeout(() => b.remove(), 3400);
+}
+
 // ---------------------------------------------------------------- update
 export function updateUI() {
   const info = S._info || { rates: {}, util: {} };
+  drainEvents();
 
   // header
-  setText($.floorChip, `Floor ${S.spire.floor}`);
+  setText($.floorChip, `🗼 Floor ${S.spire.floor}`);
   show($.floorChip, S.spire.floor > 0 || S.unlocked.spire);
   const gm = E.globalMult(S);
-  setText($.multChip, `all production ×${fmt(gm)}`);
+  setText($.multChip, `📈 ×${fmt(gm)}`);
+  $.multChip.title = 'Global production multiplier';
   show($.multChip, gm > 1.001);
-  setText($.hint, currentHint());
+
+  // hint + tutorial glow
+  const hint = currentHint();
+  show($.hint, !!hint);
+  if (hint) {
+    setText($.hintText, hint.text);
+    setGlow(hint.el || null);
+  } else {
+    setGlow(null);
+  }
 
   // gather button
   const cm = E.clickYieldMult(S);
-  setText($.gather, `Gather  (+${fmt(D.CLICK_YIELD.food * cm)} food, +${fmt(D.CLICK_YIELD.wood * cm)} wood)`);
+  setText($.gather, `👐 Gather  +${fmt(D.CLICK_YIELD.food * cm)} 🍎 +${fmt(D.CLICK_YIELD.wood * cm)} 🪵`);
 
   // rally
   show($.rally, S.unlocked.rally);
@@ -802,15 +923,15 @@ export function updateUI() {
     const t = S.stats.playTime;
     if (E.rallyActive(S)) {
       $.rally.disabled = true;
-      setText($.rally, `Rallying! all production ×${D.RALLY_MULT}`);
+      setText($.rally, `📯 Rallying! ×${D.RALLY_MULT}`);
       setBar($.rallyBar, (S.rally.activeUntil - t) / D.RALLY_SECS, fmtTime(S.rally.activeUntil - t) + ' left');
     } else if (!E.rallyReady(S)) {
       $.rally.disabled = true;
-      setText($.rally, 'Rally the camp');
+      setText($.rally, '📯 Rally the camp');
       setBar($.rallyBar, 1 - (S.rally.readyAt - t) / D.RALLY_COOLDOWN, 'ready in ' + fmtTime(S.rally.readyAt - t));
     } else {
       $.rally.disabled = false;
-      setText($.rally, `Rally the camp (×${D.RALLY_MULT} for ${fmtTime(D.RALLY_SECS)})`);
+      setText($.rally, `📯 Rally the camp  ×${D.RALLY_MULT}`);
       setBar($.rallyBar, 1, 'ready');
     }
   }
@@ -822,10 +943,13 @@ export function updateUI() {
     if (!row) {
       if (!seen) continue;
       const tr = el('tr');
+      const ic = el('td', 'res-icon');
+      ic.appendChild(icon(r.icon));
+      ic.title = r.name;
       const name = el('td', 'res-name', r.name);
       const amt = el('td', 'res-amt', '');
       const rate = el('td', 'res-rate', '');
-      tr.append(name, amt, rate);
+      tr.append(ic, name, amt, rate);
       $.resTable.appendChild(tr);
       row = rows.res[r.id] = { tr, amt, rate };
     }
@@ -839,11 +963,14 @@ export function updateUI() {
   const idle = E.idleVillagers(S);
   show($.villSummary, S.unlocked.villagers);
   setText($.villSummary,
-    `villagers ${S.villagers.length}/${E.housingCap(S)}` + (idle ? ` · ${idle} idle` : ''));
+    `👥 ${S.villagers.length}/${E.housingCap(S)}` + (idle ? ` · 💤 ${idle} idle` : ''));
 
-  // tabs
-  for (const t of TABS) show($.tabs[t.id], t.when(S));
-  if (!TABS.find(t => t.id === S._tab)?.when(S)) selectTab('chronicle');
+  // tabs: visibility + attention pulse on unlocked-but-unvisited
+  for (const t of TABS) {
+    show($.tabs[t.id], t.when(S));
+    $.tabs[t.id].classList.toggle('pulse', t.when(S) && !S.seenTabs[t.id]);
+  }
+  if (!TABS.find(t => t.id === S._tab)?.when(S)) selectTab(firstVisibleTab());
 
   // qty buttons
   for (const q of [1, 10, 25, 'max']) {
@@ -860,12 +987,15 @@ export function updateUI() {
       setText($.villCount, `Villagers: ${S.villagers.length} / ${E.housingCap(S)}`);
       const cost = D.recruitCost(S.villagers.length);
       const full = S.villagers.length >= E.housingCap(S);
-      const afford = !full && E.canAfford(S, cost);
-      setText($.recruitCost, full
-        ? 'housing full — build Cabins in the Camp'
-        : `next recruit: ${fmtCost(cost, D.RES)}`);
-      $.recruitCost.className = afford ? 'card-info cost-ok' : 'card-info cost-no';
-      $.recruitBtn.disabled = !afford;
+      if (full) {
+        $.recruitCost.textContent = '';
+        $.recruitCost._key = 'full';
+        $.recruitCost.appendChild(el('span', 'chip-cost no', '🏠 housing full — build Cabins'));
+        $.recruitBtn.disabled = true;
+      } else {
+        setCostChips($.recruitCost, cost, 'next recruit:');
+        $.recruitBtn.disabled = !E.canAfford(S, cost);
+      }
       for (const id in rows.job) updateJobRow(rows.job[id]);
       updateRoster();
       break;
@@ -906,13 +1036,13 @@ export function offlineReportNode(report) {
   if (entries.length === 0) ul.appendChild(el('div', null, 'Nothing much happened.'));
   for (const [k, v] of entries) {
     ul.appendChild(el('div', v >= 0 ? 'pos' : 'neg',
-      `${v >= 0 ? '+' : ''}${fmt(Math.round(v))} ${D.RES[k].name}`));
+      `${D.RES[k].icon} ${v >= 0 ? '+' : ''}${fmt(Math.round(v))} ${D.RES[k].name}`));
   }
   for (const [k, v] of Object.entries(report.levels)) {
-    ul.appendChild(el('div', 'pos', `${D.JOB[k].name} +${v} level${v > 1 ? 's' : ''}`));
+    ul.appendChild(el('div', 'pos', `${D.JOB[k].icon} ${D.JOB[k].name} +${v} level${v > 1 ? 's' : ''}`));
   }
-  if (report.expeditions) ul.appendChild(el('div', 'pos', `${report.expeditions} expeditions returned`));
-  if (report.floors) ul.appendChild(el('div', 'pos', `${report.floors} floor${report.floors > 1 ? 's' : ''} conquered!`));
+  if (report.expeditions) ul.appendChild(el('div', 'pos', `🧭 ${report.expeditions} expeditions returned`));
+  if (report.floors) ul.appendChild(el('div', 'pos', `🗼 ${report.floors} floor${report.floors > 1 ? 's' : ''} conquered!`));
   box.appendChild(ul);
   return box;
 }

@@ -140,6 +140,27 @@ const blob = await ta.inputValue();
 if (!blob || blob.length < 100) fail('export blob too small');
 else ok('export produces save blob (' + blob.length + ' chars)');
 
+// hard reset: type RESET, confirm, verify save is actually gone after reload.
+// Run in a fresh page: `page` carries an addInitScript that re-plants the
+// injected save on every navigation, which would mask the wipe.
+await page.close();
+page = await browser.newPage();
+await page.goto('http://localhost:8123/');
+await page.waitForTimeout(400);
+await page.locator('.savebtns button.danger').click();
+await page.locator('.save-ta').fill('reset');   // case-insensitive accept
+await page.locator('.modal button', { hasText: 'Erase everything' }).click();
+await page.waitForTimeout(900);                 // reload happens
+const afterReset = await page.evaluate(() => {
+  const raw = localStorage.getItem('rootspire-save');
+  return raw ? JSON.parse(raw) : null;
+});
+// after reload a fresh game may have autosaved a near-empty state; both null and
+// a fresh save (no floors, no buildings) count as a successful wipe
+if (afterReset && (afterReset.spire?.floor > 0 || (afterReset.buildings?.garden || 0) > 0)) {
+  fail('hard reset did not wipe progress: ' + JSON.stringify({ floor: afterReset.spire?.floor, buildings: afterReset.buildings }));
+} else ok('hard reset wipes progress (and stays wiped after reload)');
+
 if (errors.length) fail('total console errors: ' + errors.join(' | '));
 console.log(process.exitCode ? '\nSMOKE TEST FAILED' : '\nSMOKE TEST PASSED');
 await browser.close();

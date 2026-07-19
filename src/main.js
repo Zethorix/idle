@@ -57,9 +57,13 @@ setInterval(() => {
   sinceSave += TICK_MS;
   if (sinceSave >= AUTOSAVE_MS) {
     sinceSave = 0;
-    SV.save(S);
+    if (!suppressSave) SV.save(S);
   }
 }, TICK_MS);
+
+// Set during hard reset / import so unload handlers can't re-save the old
+// state over the wiped/replaced save.
+let suppressSave = false;
 
 // Spacebar = gather (unless typing in an input)
 document.addEventListener('keydown', e => {
@@ -72,9 +76,9 @@ document.addEventListener('keydown', e => {
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) SV.save(S);
+  if (document.hidden && !suppressSave) SV.save(S);
 });
-window.addEventListener('beforeunload', () => SV.save(S));
+window.addEventListener('beforeunload', () => { if (!suppressSave) SV.save(S); });
 
 // ---------------------------------------------------------------- save UI
 window.addEventListener('rs-save', () => {
@@ -115,10 +119,11 @@ window.addEventListener('rs-import', () => {
     ['Import', () => {
       try {
         const imported = SV.importSave(ta.value);
-        S = imported;
-        SV.save(S);
+        suppressSave = true;         // unload handlers must not overwrite it
+        SV.save(imported);
         location.reload();
       } catch (e) {
+        suppressSave = false;
         alert('That did not look like a valid save. (' + e.message + ')');
       }
     }],
@@ -131,10 +136,15 @@ window.addEventListener('rs-reset', () => {
   showModal('Hard reset', wrap(ta,
     'This erases ALL progress permanently. Rootspire has no prestige resets — you never need to do this to progress. Type RESET to confirm.'), [
     ['Erase everything', () => {
-      if (ta.value.trim() === 'RESET') {
-        SV.wipe();
-        location.reload();
+      if (ta.value.trim().toUpperCase() !== 'RESET') {
+        ta.classList.add('shake');
+        ta.placeholder = 'you must type RESET first';
+        setTimeout(() => ta.classList.remove('shake'), 500);
+        return;
       }
+      suppressSave = true;           // unload handlers must not re-save old state
+      SV.wipe();
+      location.reload();
     }, 'danger'],
     ['Cancel', hideModal, 'small'],
   ]);
